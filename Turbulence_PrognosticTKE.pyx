@@ -66,8 +66,6 @@ cdef class EDMF_PrognosticTKE(ParameterizationBase):
                 self.entr_detr_fp = entr_detr_inverse_w
             elif str(namelist['turbulence']['EDMF_PrognosticTKE']['entrainment']) == 'b_w2':
                 self.entr_detr_fp = entr_detr_b_w2
-            elif str(namelist['turbulence']['EDMF_PrognosticTKE']['entrainment']) == 'buoyancy_sorting':
-                self.entr_detr_fp = entr_detr_buoyancy_sorting
             elif str(namelist['turbulence']['EDMF_PrognosticTKE']['entrainment']) == 'entr_detr_tke':
                 self.entr_detr_fp = entr_detr_tke
             elif str(namelist['turbulence']['EDMF_PrognosticTKE']['entrainment']) == 'entr_detr_tke2':
@@ -838,50 +836,51 @@ cdef class EDMF_PrognosticTKE(ParameterizationBase):
                     covar_e.values[k] = 0.0
         return
 
-
-
-
     cpdef compute_entrainment_detrainment(self, GridMeanVariables GMV, CasesBase Case):
         cdef:
             Py_ssize_t k
             entr_struct ret
             entr_in_struct input
             eos_struct sa
+            #double [:] Poisson_rand
+            double [:] Poisson_rand
+            double logfn
 
 
         self.UpdVar.get_cloud_base_top_cover()
 
         input.wstar = self.wstar
-
-        with nogil:
-            for i in xrange(self.n_updrafts):
-                input.zi = self.UpdVar.cloud_base[i]
-                for k in xrange(self.Gr.gw, self.Gr.nzg-self.Gr.gw):
-                    input.b = self.UpdVar.B.values[i,k]
-                    input.w = interp2pt(self.UpdVar.W.values[i,k],self.UpdVar.W.values[i,k-1])
-                    input.z = self.Gr.z_half[k]
-                    input.af = self.UpdVar.Area.values[i,k]
-                    input.ml = self.mixing_length[k]
-                    input.qt_env = self.EnvVar.QT.values[k]
-                    input.ql_env = self.EnvVar.QL.values[k]
-                    input.H_env = self.EnvVar.H.values[k]
-                    input.b_env = self.EnvVar.B.values[k]
-                    input.w_env = self.EnvVar.W.values[k]
-                    input.H_up = self.UpdVar.H.values[i,k]
-                    input.qt_up = self.UpdVar.QT.values[i,k]
-                    input.ql_up = self.UpdVar.QL.values[i,k]
-                    input.p0 = self.Ref.p0_half[k]
-                    input.alpha0 = self.Ref.alpha0_half[k]
-                    input.T_mean = (self.EnvVar.T.values[k]+self.UpdVar.T.values[i,k])/2
-                    input.L = 20000.0 # need to define the scale of the GCM grid resolution
-                    if self.calc_tke:
-                        input.tke = self.EnvVar.TKE.values[k]
-                        input.tke_ed_coeff  = self.tke_ed_coeff
-
-                    ret = self.entr_detr_fp(input)
-                    self.entr_sc[i,k] = ret.entr_sc * self.entrainment_factor
-                    self.detr_sc[i,k] = ret.detr_sc * self.detrainment_factor
-
+        for i in xrange(self.n_updrafts):
+            input.zi = self.UpdVar.cloud_base[i]
+            Poisson_rand = np.random.poisson(10.0,self.Gr.nzg).astype(np.float)
+            Poisson_rand= np.clip(Poisson_rand,0.01,100.0)
+            for k in xrange(self.Gr.gw, self.Gr.nzg-self.Gr.gw):
+                input.b = self.UpdVar.B.values[i,k]
+                input.b_mean = GMV.B.values[k]
+                input.w = interp2pt(self.UpdVar.W.values[i,k],self.UpdVar.W.values[i,k-1])
+                input.dw = (self.UpdVar.W.values[i,k]-self.UpdVar.W.values[i,k-1])/self.Gr.dz
+                input.z = self.Gr.z_half[k]
+                input.af = self.UpdVar.Area.values[i,k]
+                input.tke = self.EnvVar.TKE.values[k]
+                input.ml = self.mixing_length[k]
+                input.qt_env = self.EnvVar.QT.values[k]
+                input.ql_env = self.EnvVar.QL.values[k]
+                input.T_env = self.EnvVar.T.values[k]
+                input.H_env = self.EnvVar.H.values[k]
+                input.w_env = interp2pt(self.EnvVar.W.values[k],self.EnvVar.W.values[k-1])
+                input.dw_env = (self.EnvVar.W.values[k]-self.EnvVar.W.values[k-1])/self.Gr.dz
+                input.H_up = self.UpdVar.H.values[i,k]
+                input.qt_up = self.UpdVar.QT.values[i,k]
+                input.ql_up = self.UpdVar.QL.values[i,k]
+                input.T_up = self.UpdVar.T.values[i,k]
+                input.p0 = self.Ref.p0_half[k]
+                input.alpha0 = self.Ref.alpha0_half[k]
+                input.tke_ed_coeff  = self.tke_ed_coeff
+                input.Poisson_rand = Poisson_rand[k]/10.0
+                input.L = 20000.0 # need to define the scale of the GCM grid resolution
+                ret = self.entr_detr_fp(input)
+                self.entr_sc[i,k] = ret.entr_sc * self.entrainment_factor
+                self.detr_sc[i,k] = ret.detr_sc * self.detrainment_factor
         return
 
     cpdef solve_updraft_velocity_area(self, GridMeanVariables GMV, TimeStepping TS):
