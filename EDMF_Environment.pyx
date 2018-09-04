@@ -47,6 +47,8 @@ cdef class EnvironmentVariables:
         self.T = EnvironmentVariable( nz, 'half', 'scalar', 'temperature','K' )
         self.B = EnvironmentVariable( nz, 'half', 'scalar', 'buoyancy','m^2/s^3' )
         self.CF = EnvironmentVariable(nz, 'half', 'scalar','cloud_fraction', '-')
+        self.Area = EnvironmentVariable(nz, 'half', 'scalar','env_area', '-')
+
 
         # TKE   TODO   repeated from Variables.pyx logic
         if  namelist['turbulence']['scheme'] == 'EDMF_PrognosticTKE':
@@ -106,6 +108,7 @@ cdef class EnvironmentVariables:
         Stats.add_profile('env_qt')
         Stats.add_profile('env_ql')
         Stats.add_profile('env_qr')
+        Stats.add_profile('env_area')
         if self.H.name == 's':
             Stats.add_profile('env_s')
         else:
@@ -119,13 +122,19 @@ cdef class EnvironmentVariables:
             Stats.add_profile('env_HQTcov')
         if self.EnvThermo_scheme == 'sommeria_deardorff':
             Stats.add_profile('env_THVvar')
+
+        Stats.add_ts('env_puddle')
+
         return
+
+
 
     cpdef io(self, NetCDFIO_Stats Stats):
         Stats.write_profile('env_w', self.W.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
         Stats.write_profile('env_qt', self.QT.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
         Stats.write_profile('env_ql', self.QL.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
         Stats.write_profile('env_qr', self.QR.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
+        Stats.write_profile('env_area', self.Area.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
         if self.H.name == 's':
             Stats.write_profile('env_s', self.H.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
         else:
@@ -141,7 +150,13 @@ cdef class EnvironmentVariables:
         if self.EnvThermo_scheme  == 'sommeria_deardorff':
             Stats.write_profile('env_THVvar', self.THVvar.values[self.Gr.gw:self.Gr.nzg-self.Gr.gw])
 
+        env_puddle = 0.0
+        for k in xrange(self.Gr.gw, self.Gr.nzg-self.Gr.gw):
+            env_puddle += self.Area.values[k] * self.QR.values[k]
+        Stats.write_ts('env_puddle', env_puddle)
+
         #ToDo [suggested by CK for AJ ;]
+        # AJ:  OK
         # Add output of environmental cloud fraction, cloud base, cloud top (while the latter can be gleaned from ql profiles
         # it is more convenient to simply have them in the stats files!
         # Add the same with respect to the grid mean
@@ -185,7 +200,7 @@ cdef class EnvironmentThermodynamics:
         EnvVar.H.values[k]   = H
         EnvVar.QT.values[k]  = qt
         EnvVar.QL.values[k]  = ql
-        EnvVar.QR.values[k] += qr
+        EnvVar.QR.values[k]  = qr
         EnvVar.B.values[k]   = buoyancy_c(self.Ref.alpha0_half[k], alpha)
         return
 
